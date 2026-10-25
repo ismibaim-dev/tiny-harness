@@ -1,0 +1,411 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,interactive-widget=resizes-content">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#111418">
+<link rel="manifest" href="/manifest.json">
+<title>tiny harness</title>
+<style>
+:root{--bg:#111418;--fg:#e6e8eb;--mut:#8b93a1;--card:#1a1f26;--line:#2a313b;--acc:#6aa9ff;--ok:#3ecf8e;--bad:#ff6b6b;--warn:#f5b54a;--user:#243248;--code:#0c0f13;--onacc:#0b1220}
+@media (prefers-color-scheme:light){:root{--bg:#f6f7f9;--fg:#15181d;--mut:#667085;--card:#fff;--line:#dde1e7;--acc:#1f6feb;--ok:#138a5a;--bad:#d0342c;--warn:#b7791f;--user:#dbe8ff;--code:#eef0f3;--onacc:#fff}}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font:16px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+body{display:flex;flex-direction:column;height:100dvh}
+header{display:flex;gap:8px;align-items:center;padding:calc(8px + env(safe-area-inset-top)) 12px 8px;border-bottom:1px solid var(--line);background:var(--card)}
+.dot{width:10px;height:10px;border-radius:50%;background:var(--mut);flex:none}
+.dot.busy{background:var(--acc);animation:p 1s infinite}
+.dot.off{background:var(--bad)}
+@keyframes p{50%{opacity:.3}}
+.ttl{flex:1;min-width:0}
+.ttl h1{font-size:15px;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600}
+.ttl small{display:block;color:var(--mut);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+select,button,input{font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:6px 10px}
+button{cursor:pointer}
+button:disabled{opacity:.5}
+button.pri{background:var(--acc);border-color:var(--acc);color:var(--onacc)}
+button.bad{background:var(--bad);border-color:var(--bad);color:#fff}
+#chip{max-width:44vw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:14px}
+#log{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:10px;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
+.msg{max-width:92%;padding:9px 12px;border-radius:14px;white-space:pre-wrap;word-wrap:break-word;overflow-wrap:anywhere}
+.msg.user{align-self:flex-end;background:var(--user)}
+.msg.bot{align-self:flex-start;background:var(--card);border:1px solid var(--line)}
+.msg.live{border-style:dashed}
+.msg.err{align-self:center;color:var(--bad);font-size:14px;text-align:center}
+.msg .att{display:block;font-size:13px;color:var(--mut);margin-top:4px}
+pre{margin:6px 0 0;padding:8px 10px;background:var(--code);border-radius:8px;overflow-x:auto;font:13px/1.4 ui-monospace,Menlo,Consolas,monospace;white-space:pre-wrap;word-break:break-word}
+code{font:0.9em ui-monospace,Menlo,Consolas,monospace;background:var(--code);padding:1px 5px;border-radius:5px}
+.msg pre{margin:6px 0}
+details.call,details.cmp{align-self:stretch;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:6px 10px;font-size:14px}
+details summary{cursor:pointer;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+details.call summary b{color:var(--fg)}
+details.call.err summary{color:var(--bad)}
+details.call.run summary::after{content:" …";color:var(--acc)}
+details.cmp{border-style:dashed}
+.card.appr{align-self:stretch;border:2px solid var(--warn);border-radius:14px;padding:10px 12px;background:var(--card)}
+.card.appr .t{font-weight:600}
+.card.appr .btns{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+.card.appr .btns button{flex:1;padding:10px;min-width:30%}
+.card.appr.done{border-color:var(--line);opacity:.75}
+form{display:flex;flex-direction:column;gap:6px;padding:8px 12px calc(8px + env(safe-area-inset-bottom));border-top:1px solid var(--line);background:var(--card)}
+.row{display:flex;gap:8px;align-items:flex-end}
+textarea{flex:1;resize:none;max-height:160px;font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:14px;padding:9px 12px;outline:none}
+form button{padding:9px 14px;border-radius:14px}
+#thumbs{display:flex;gap:6px;overflow-x:auto}
+#thumbs:empty{display:none}
+#thumbs div{position:relative;flex:none}
+#thumbs img{width:56px;height:56px;object-fit:cover;border-radius:8px;border:1px solid var(--line);display:block}
+#thumbs button{position:absolute;top:-6px;right:-6px;padding:0 6px;border-radius:50%;font-size:12px;line-height:18px}
+.ov{position:fixed;inset:0;background:rgba(0,0,0,.5);display:none;z-index:5}
+.ov.open{display:block}
+.drawer{position:absolute;left:0;top:0;bottom:0;width:min(86vw,360px);background:var(--card);padding:calc(12px + env(safe-area-inset-top)) 12px 12px;overflow-y:auto}
+.sheet{position:absolute;left:0;right:0;bottom:0;max-height:88vh;overflow-y:auto;background:var(--card);border-radius:18px 18px 0 0;padding:16px 16px calc(16px + env(safe-area-inset-bottom))}
+.sheet h3{margin:0 0 10px;font-size:16px}
+.fld{display:flex;flex-direction:column;gap:6px;margin-bottom:14px}
+.fld>span{font-size:13px;color:var(--mut)}
+.fld select,.fld input{width:100%;padding:10px}
+.seg{display:flex;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.seg button{flex:1;border:0;border-radius:0;padding:10px}
+.seg button.on{background:var(--acc);color:var(--onacc)}
+.stats{font-size:13px;color:var(--mut);background:var(--bg);border-radius:10px;padding:10px;line-height:1.6}
+.bar{height:6px;background:var(--line);border-radius:3px;overflow:hidden;margin-top:4px}
+.bar i{display:block;height:100%;background:var(--acc)}
+.sess{display:flex;gap:8px;align-items:center;padding:10px 6px;border-bottom:1px solid var(--line)}
+.sess .nm{flex:1;min-width:0;cursor:pointer}
+.sess .nm small{display:block;color:var(--mut)}
+.sess .nm div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#login{margin:auto;width:min(92vw,380px);display:flex;flex-direction:column;gap:10px;padding:20px}
+#login input{padding:10px 12px;border-radius:12px;background:var(--card)}
+.hide{display:none!important}
+</style>
+</head>
+<body>
+
+<div id="login" class="hide">
+  <h2 style="margin:0">tiny harness</h2>
+  <div style="color:var(--mut)">Paste the access token printed by the server (or in <code>~/.tiny-harness/token</code>).</div>
+  <input id="tok" type="password" placeholder="token" autocomplete="off" autocapitalize="off" spellcheck="false">
+  <button class="pri" id="tokgo">Connect</button>
+  <div id="loginerr" style="color:var(--bad)"></div>
+</div>
+
+<header id="hdr" class="hide">
+  <button id="menu" aria-label="Chats">☰</button>
+  <span class="dot" id="dot"></span>
+  <div class="ttl"><h1 id="title">new chat</h1><small id="meta"></small></div>
+  <button id="chip" aria-label="Model and settings">…</button>
+</header>
+<div id="log" class="hide"></div>
+<form id="form" class="hide">
+  <div id="thumbs"></div>
+  <div class="row">
+    <button type="button" id="attach" aria-label="Attach image">📎</button>
+    <input type="file" id="file" accept="image/*" multiple class="hide">
+    <textarea id="ta" rows="1" placeholder="Message the agent…" enterkeyhint="send"></textarea>
+    <button id="send" class="pri" type="submit">Send</button>
+  </div>
+</form>
+
+<div class="ov" id="drawer"><div class="drawer">
+  <div class="fld"><span>New chat in workspace</span>
+    <div style="display:flex;gap:8px"><select id="newws" style="flex:1"></select><button class="pri" id="newchat">+ New</button></div>
+  </div>
+  <div id="sesslist"></div>
+  <button id="logout" style="margin-top:16px;width:100%">Forget token</button>
+</div></div>
+
+<div class="ov" id="settings"><div class="sheet">
+  <h3>This chat</h3>
+  <div class="fld"><span>Provider</span><select id="prof"></select></div>
+  <div class="fld"><span>Model</span>
+    <select id="model"></select>
+    <div style="display:flex;gap:8px"><input id="custom" placeholder="or type a model id" autocapitalize="off" autocomplete="off" spellcheck="false" style="flex:1"><button type="button" id="usecustom">Use</button></div>
+    <button type="button" id="loadmodels">Load all models from the provider</button>
+  </div>
+  <div class="fld"><span>Approvals</span>
+    <div class="seg" id="modeseg"><button type="button" data-m="ask">Ask for everything</button><button type="button" data-m="auto-edit">Auto-approve edits</button></div>
+    <small id="yolo" class="hide" style="color:var(--warn)">yolo mode (set on the PC): nothing asks for approval</small>
+  </div>
+  <div class="fld"><span>Workspace</span><select id="ws"></select><small id="wspath" style="color:var(--mut);word-break:break-all"></small></div>
+  <div class="fld"><span>Usage</span><div class="stats" id="stats"></div></div>
+  <div style="display:flex;gap:8px">
+    <button type="button" id="compact" style="flex:1">Compact context</button>
+    <button type="button" class="pri" id="closeset" style="flex:1">Done</button>
+  </div>
+  <div id="seterr" style="color:var(--bad);margin-top:8px"></div>
+</div></div>
+
+<script>
+const $=s=>document.querySelector(s);
+const el=(t,c,txt)=>{const e=document.createElement(t);if(c)e.className=c;if(txt!=null)e.textContent=txt;return e};
+const ls={get:k=>{try{return localStorage.getItem(k)||''}catch(e){return ''}},set:(k,v)=>{try{localStorage.setItem(k,v)}catch(e){}},del:k=>{try{localStorage.removeItem(k)}catch(e){}}};
+let token=ls.get('th_token'), sid=ls.get('th_sid');
+let epoch='', since=0, lv=-1, busy=false, runId=0, ctl=null, calls={}, aps={}, info=null, st={}, liveEl=null, replay=true, pics=[];
+const log=$('#log');
+
+async function api(path,opts={}){
+  const r=await fetch(path,{...opts,headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'}});
+  if(r.status===401){ token=''; ls.del('th_token'); showLogin('Wrong or expired token.'); throw new Error('unauthorized'); }
+  if(!r.ok) throw new Error((await r.text()).trim()||('HTTP '+r.status));
+  return r.json();
+}
+const post=(p,b)=>api(p,{method:'POST',body:JSON.stringify(b)});
+const fmt=n=>n>=1e6?(n/1e6).toFixed(1)+'M':n>=1e3?(n/1e3).toFixed(n>=1e4?0:1)+'k':String(n||0);
+
+function showLogin(msg){
+  runId++; if(ctl) ctl.abort();
+  ['#hdr','#log','#form'].forEach(s=>$(s).classList.add('hide'));
+  $('#login').classList.remove('hide'); $('#loginerr').textContent=msg||'';
+}
+function showApp(){ $('#login').classList.add('hide'); ['#hdr','#log','#form'].forEach(s=>$(s).classList.remove('hide')); }
+
+async function start(){
+  if(!token){ showLogin(); return; }
+  try{
+    info=await api('/api/info');
+    fill($('#prof'),info.profiles.map(p=>[p.name,p.name+'  ('+p.type+')']));
+    fill($('#ws'),info.workspaces.map(w=>[w,w]));
+    fill($('#newws'),info.workspaces.map(w=>[w,w]));
+    if(!info.profiles.length){ showApp(); put(el('div','msg err','No model has an API key. Set one (e.g. GEMINI_API_KEY) on the PC and restart.')); }
+    showApp();
+    await openSession(sid);
+  }catch(e){ if(e.message!=='unauthorized') showLogin('Cannot reach server: '+e.message); }
+}
+function fill(sel,opts){ sel.textContent=''; opts.forEach(([v,t])=>{const o=el('option',null,t);o.value=v;sel.appendChild(o)}); }
+
+async function openSession(id,ws){
+  const s=await post('/api/session',{id,profile:info.default,workspace:ws||''});
+  sid=s.id; ls.set('th_sid',sid);
+  clearChat(); since=0; epoch=''; lv=-1; replay=true;
+  poll();
+}
+function clearChat(){ log.textContent=''; calls={}; aps={}; liveEl=null; $('#title').textContent='new chat'; }
+
+function setBusy(b){
+  busy=b; $('#dot').className='dot'+(b?' busy':'');
+  const sb=$('#send'); sb.textContent=b?'Stop':'Send'; sb.className=b?'bad':'pri';
+}
+function applyState(d){
+  st=d; setBusy(d.busy);
+  if(d.title) $('#title').textContent=d.title;
+  $('#chip').textContent=d.profile+' · '+d.model;
+  const pct=info.max_ctx?Math.min(100,Math.round(100*d.ctx/info.max_ctx)):0;
+  $('#meta').textContent=(d.workspace!=='default'?d.workspace+' · ':'')+(d.ctx?fmt(d.ctx)+' ctx ('+pct+'%) · ':'')+fmt(d.usage.in)+' in / '+fmt(d.usage.out)+' out';
+  if($('#settings').classList.contains('open')) syncSettings();
+}
+
+async function poll(){
+  const my=++runId; if(ctl) ctl.abort();
+  let fails=0;
+  while(my===runId && token){
+    ctl=new AbortController();
+    try{
+      const r=await fetch(`/api/poll?id=${sid}&since=${since}&epoch=${epoch}&lv=${lv}&wait=25`,
+        {headers:{'Authorization':'Bearer '+token},signal:ctl.signal});
+      if(r.status===401){ token=''; ls.del('th_token'); showLogin('Wrong or expired token.'); return; }
+      if(r.status===404){ await openSession(''); return; }
+      if(!r.ok) throw new Error('HTTP '+r.status);
+      const d=await r.json();
+      if(my!==runId) return;
+      fails=0;
+      if(d.reset){ clearChat(); replay=true; }
+      epoch=d.epoch; since=d.next; lv=d.lv;
+      d.events.forEach(render);
+      setLive(d.live);
+      applyState(d);
+      replay=false;
+    }catch(e){
+      if(e.name==='AbortError') return;
+      fails++; $('#dot').className='dot off';
+      await new Promise(r=>setTimeout(r,Math.min(1000*2**fails,15000)));
+    }
+  }
+}
+document.addEventListener('visibilitychange',()=>{ if(!document.hidden && token && sid){ document.title='tiny harness'; poll(); } });
+
+function nearBottom(){ return log.scrollHeight-log.scrollTop-log.clientHeight<160; }
+function put(node){
+  const near=nearBottom();
+  if(liveEl && liveEl.parentNode) log.insertBefore(node,liveEl); else log.appendChild(node);
+  if(near) log.scrollTop=log.scrollHeight;
+}
+function setLive(text){
+  if(!text){ if(liveEl){ liveEl.remove(); liveEl=null; } return; }
+  const near=nearBottom();
+  if(!liveEl){ liveEl=el('div','msg bot live'); log.appendChild(liveEl); }
+  liveEl.textContent=''; rich(liveEl,text);
+  if(near) log.scrollTop=log.scrollHeight;
+}
+function inline(box,text){
+  text.split(/(`[^`\n]+`|\*\*[^*\n]+\*\*)/).forEach(q=>{
+    if(!q) return;
+    if(q.startsWith('`')&&q.endsWith('`')&&q.length>2) box.appendChild(el('code',null,q.slice(1,-1)));
+    else if(q.startsWith('**')&&q.endsWith('**')&&q.length>4) box.appendChild(el('b',null,q.slice(2,-2)));
+    else box.appendChild(document.createTextNode(q.replace(/^#{1,6} /gm,'')));
+  });
+}
+function rich(box,text){
+  text.split('```').forEach((p,i)=>{
+    if(i%2){ box.appendChild(el('pre',null,p.replace(/^[\w+.-]*\n/,'').replace(/\n$/,''))); return; }
+    inline(box,p);
+  });
+}
+function alertUser(){
+  if(replay) return;
+  if(navigator.vibrate) try{navigator.vibrate(150)}catch(e){}
+  if(document.hidden) document.title='(!) approval needed';
+}
+function render(e){
+  switch(e.type){
+    case 'user': {
+      const m=el('div','msg user',e.text);
+      if(e.imgs) m.appendChild(el('span','att','📎 '+e.imgs+' image'+(e.imgs>1?'s':'')));
+      put(m); break; }
+    case 'assistant': { const m=el('div','msg bot'); rich(m,e.text); put(m); break; }
+    case 'error': put(el('div','msg err',e.text)); break;
+    case 'compact': {
+      const d=el('details','cmp'); d.appendChild(el('summary',null,'🗜 Context compacted (tap for summary)'));
+      d.appendChild(el('pre',null,e.text)); put(d); break; }
+    case 'tool_call': {
+      const d=el('details','call run'), lines=(e.text||'').split('\n'), s=el('summary');
+      s.appendChild(el('b',null,e.name.replace(/^mcp__/,'⚙ '))); s.appendChild(document.createTextNode('  '+lines[0]));
+      d.appendChild(s);
+      if(lines.length>1) d.appendChild(el('pre',null,lines.slice(1).join('\n')));
+      calls[e.id]=d; put(d); break; }
+    case 'tool_result': {
+      const d=calls[e.id]; if(!d) break;
+      d.classList.remove('run'); if(e.err) d.classList.add('err');
+      d.appendChild(el('pre',null,e.text||'(no output)')); break; }
+    case 'approval': {
+      const c=el('div','card appr');
+      c.appendChild(el('div','t','Allow '+e.name+'?'));
+      c.appendChild(el('pre',null,e.text));
+      const b=el('div','btns'), yes=el('button','pri','Approve'), no=el('button',null,'Deny'), all=el('button',null,'Allow all this turn');
+      const answer=(ok,every)=>{ [yes,no,all].forEach(x=>x.disabled=true);
+        post('/api/approve',{id:sid,call_id:e.id,allow:ok,all:!!every}).catch(x=>{ [yes,no,all].forEach(y=>y.disabled=false); put(el('div','msg err',x.message)); }); };
+      yes.onclick=()=>answer(true); no.onclick=()=>answer(false); all.onclick=()=>answer(true,true);
+      b.append(yes,no,all); c.appendChild(b); aps[e.id]=c; put(c); alertUser(); break; }
+    case 'approval_done': {
+      const c=aps[e.id]; if(!c) break;
+      c.classList.add('done'); const b=c.querySelector('.btns');
+      if(b) b.replaceWith(el('div',null,e.text==='allowed'?'✓ Approved':'✕ Denied')); break; }
+  }
+}
+
+// ---------------------------------------------------------------- composer
+const ta=$('#ta');
+const grow=()=>{ta.style.height='auto';ta.style.height=Math.min(ta.scrollHeight,160)+'px'};
+ta.addEventListener('input',grow);
+ta.addEventListener('keydown',e=>{ if(e.key==='Enter' && (e.ctrlKey||e.metaKey)){ e.preventDefault(); $('#form').requestSubmit(); } });
+$('#form').addEventListener('submit',async ev=>{
+  ev.preventDefault();
+  if(busy){ post('/api/stop',{id:sid}).catch(()=>{}); return; }
+  const t=ta.value.trim(); if(!t && !pics.length) return;
+  const images=pics.map(p=>({media:p.media,data:p.data}));
+  const keep=pics; ta.value=''; pics=[]; drawThumbs(); grow();
+  try{ await post('/api/send',{id:sid,text:t,images}); setBusy(true); poll(); }
+  catch(e){ put(el('div','msg err',e.message)); ta.value=t; pics=keep; drawThumbs(); grow(); }
+});
+
+$('#attach').onclick=()=>$('#file').click();
+$('#file').onchange=async e=>{
+  for(const f of [...e.target.files].slice(0,6-pics.length)){
+    try{ pics.push(await shrink(f)); }catch(x){ put(el('div','msg err','Could not read image '+f.name+': '+x.message)); }
+  }
+  e.target.value=''; drawThumbs();
+};
+// Downscale on the phone so uploads stay small (≈200-400 KB) and models get a sane size.
+async function shrink(file){
+  const url=URL.createObjectURL(file);
+  try{
+    const img=await new Promise((res,rej)=>{const i=new Image();i.onload=()=>res(i);i.onerror=()=>rej(new Error('unsupported format'));i.src=url;});
+    const max=1568, k=Math.min(1,max/Math.max(img.naturalWidth,img.naturalHeight));
+    const c=document.createElement('canvas'); c.width=Math.round(img.naturalWidth*k); c.height=Math.round(img.naturalHeight*k);
+    c.getContext('2d').drawImage(img,0,0,c.width,c.height);
+    const dataUrl=c.toDataURL('image/jpeg',0.85);
+    return {media:'image/jpeg',data:dataUrl.split(',')[1],thumb:dataUrl};
+  }finally{ URL.revokeObjectURL(url); }
+}
+function drawThumbs(){
+  const box=$('#thumbs'); box.textContent='';
+  pics.forEach((p,i)=>{ const d=el('div'), im=el('img'), x=el('button',null,'✕'); im.src=p.thumb;
+    x.type='button'; x.onclick=()=>{pics.splice(i,1);drawThumbs()}; d.append(im,x); box.appendChild(d); });
+}
+
+// ---------------------------------------------------------------- settings
+const settings=$('#settings');
+let fetched={};
+$('#chip').onclick=()=>{ $('#seterr').textContent=''; syncSettings(); settings.classList.add('open'); };
+$('#closeset').onclick=()=>settings.classList.remove('open');
+settings.addEventListener('click',e=>{ if(e.target===settings) settings.classList.remove('open'); });
+function syncSettings(){
+  if(!st.profile) return;
+  $('#prof').value=st.profile;
+  const p=info.profiles.find(x=>x.name===st.profile)||{models:[]};
+  const list=[...new Set([...(p.models||[]),...(fetched[st.profile]||[]),st.model])].filter(Boolean);
+  fill($('#model'),list.map(m=>[m,m+(m===p.model?'  (default)':'')]));
+  $('#model').value=st.model;
+  $('#ws').value=st.workspace; $('#wspath').textContent=info.paths[st.workspace]||'';
+  document.querySelectorAll('#modeseg button').forEach(b=>b.classList.toggle('on',b.dataset.m===st.mode));
+  $('#yolo').classList.toggle('hide',st.mode!=='yolo');
+  [$('#prof'),$('#model'),$('#ws'),$('#usecustom'),$('#compact')].forEach(x=>x.disabled=st.busy);
+  const pct=info.max_ctx?Math.min(100,Math.round(100*st.ctx/info.max_ctx)):0;
+  const s=$('#stats'); s.textContent='';
+  s.append('Context now: '+fmt(st.ctx)+' tokens ('+pct+'% of the auto-compact budget)');
+  const bar=el('div','bar'), fillb=el('i'); fillb.style.width=pct+'%'; bar.appendChild(fillb); s.appendChild(bar);
+  s.append(el('div',null,'Total this chat: '+fmt(st.usage.in)+' in · '+fmt(st.usage.out)+' out'+(st.usage.cache_read?' · '+fmt(st.usage.cache_read)+' cached':'')));
+  s.append(el('div',null,info.tools+' tools'+(info.mcp_tools?' ('+info.mcp_tools+' from MCP)':'')+' · v'+info.version));
+}
+async function cfg(body){
+  $('#seterr').textContent='';
+  try{ await post('/api/config',{id:sid,...body}); }catch(e){ $('#seterr').textContent=e.message; syncSettings(); }
+}
+$('#prof').onchange=e=>cfg({profile:e.target.value});
+$('#model').onchange=e=>cfg({model:e.target.value});
+$('#usecustom').onclick=()=>{ const m=$('#custom').value.trim(); if(m){ cfg({model:m}); $('#custom').value=''; } };
+$('#ws').onchange=e=>cfg({workspace:e.target.value});
+document.querySelectorAll('#modeseg button').forEach(b=>b.onclick=()=>cfg({mode:b.dataset.m}));
+$('#loadmodels').onclick=async()=>{
+  const b=$('#loadmodels'); b.disabled=true; b.textContent='Loading…';
+  try{ fetched[st.profile]=await api('/api/models?profile='+encodeURIComponent(st.profile)); syncSettings(); b.textContent='Loaded '+fetched[st.profile].length+' models'; }
+  catch(e){ $('#seterr').textContent=e.message; b.textContent='Load all models from the provider'; }
+  b.disabled=false;
+};
+$('#compact').onclick=async()=>{
+  try{ await post('/api/compact',{id:sid}); settings.classList.remove('open'); poll(); }
+  catch(e){ $('#seterr').textContent=e.message; }
+};
+
+// ---------------------------------------------------------------- drawer
+const drawer=$('#drawer');
+$('#menu').onclick=async ()=>{
+  drawer.classList.add('open');
+  const box=$('#sesslist'); box.textContent='Loading…';
+  try{
+    const items=await api('/api/sessions'); box.textContent='';
+    if(!items.length) box.textContent='No saved chats yet.';
+    items.forEach(it=>{
+      const row=el('div','sess'), nm=el('div','nm');
+      nm.appendChild(el('div',null,(it.id===sid?'● ':'')+(it.title||'(untitled)')));
+      nm.appendChild(el('small',null,it.profile+(it.workspace&&it.workspace!=='default'?' · '+it.workspace:'')+' · '+new Date(it.updated*1000).toLocaleString()));
+      nm.onclick=()=>{ drawer.classList.remove('open'); openSession(it.id); };
+      const del=el('button',null,'✕'); del.onclick=async()=>{ if(!confirm('Delete this chat?')) return;
+        await post('/api/delete',{id:it.id}); row.remove(); if(it.id===sid) openSession(''); };
+      row.append(nm,del); box.appendChild(row);
+    });
+  }catch(e){ box.textContent=e.message; }
+};
+drawer.addEventListener('click',e=>{ if(e.target===drawer) drawer.classList.remove('open'); });
+$('#newchat').onclick=()=>{ drawer.classList.remove('open'); openSession('',$('#newws').value); };
+$('#logout').onclick=()=>{ token=''; ls.del('th_token'); drawer.classList.remove('open'); showLogin(); };
+
+// ---------------------------------------------------------------- login
+$('#tokgo').onclick=()=>{ token=$('#tok').value.trim(); if(!token) return; ls.set('th_token',token); $('#tok').value=''; start(); };
+$('#tok').addEventListener('keydown',e=>{ if(e.key==='Enter') $('#tokgo').click(); });
+
+start();
+</script>
+</body>
+</html>
