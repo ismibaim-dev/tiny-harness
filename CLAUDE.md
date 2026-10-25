@@ -2,7 +2,7 @@
 
 Lightweight AI coding-agent harness, controlled from a phone. Single Go binary, stdlib only,
 serves its own mobile web UI. Owner runs it on his Windows laptop and reaches it via Tailscale.
-Current version: **0.2.1** (`const version` in main.go).
+Current version: **0.3.0** (`const version` in main.go).
 
 ## Goals and hard constraints
 - Stay lightweight: no third-party Go deps, ~7 MB binary, ~9 MB RSS idle (~1.5 MB private; rest is the mapped binary).
@@ -24,6 +24,7 @@ Current version: **0.2.1** (`const version` in main.go).
 | prov_mock.go | scripted test provider (`"type":"mock"`) |
 | tools.go | bash/read_file/write_file/edit_file/list_dir/grep, path jail, PowerShell -EncodedCommand |
 | fetch.go | web_fetch tool (crude HTML→text) |
+| jev.go | optional TypeSafe Jev risk check (shadow mode) + `-risk-report` |
 | mcp.go | minimal stdio MCP client (initialize, tools/list paginated, tools/call) |
 | proc_unix.go / proc_windows.go | kill whole process tree on timeout/stop |
 | web/index.html | the phone UI (embedded with go:embed), vanilla JS, light/dark tokens |
@@ -67,10 +68,20 @@ at iPhone size (chat, streaming, approve/deny, images, model switch, compaction,
   First real runs should be: Gemini (thought signatures), DeepSeek (reasoning echo), PowerShell commands.
 - Model ids in presets come from provider docs as of Oct 2026 and go stale; the UI can load live model lists.
 
-## Next feature: TypeSafe Jev risk check (owner has early access + $5 credit)
+## TypeSafe Jev risk check (owner has early access + $5 credit)
 Jev is a "System One" decision model: it answers typed questions about a `state` with probabilities and
-scores. It generates no text and calls no tools, so it is NOT a chat provider. It becomes a small optional
-"risk check" that runs before each approval card. Not built yet.
+scores. It generates no text and calls no tools, so it is NOT a chat provider. It is a small optional
+"risk check" on each approval card.
+
+**Status (0.3.0): phase 1 shadow built** in `jev.go`, hooked in `askApproval`. Deviations from the plan below:
+- In shadow mode the check runs *beside* the card, not before it, so it adds zero latency; `latency_ms` is
+  logged to judge whether the 3 s budget is realistic for badge mode, which must await it before the card.
+- Decision values are `allowed` / `denied` / `no_answer` (turn stopped or 30 min timeout), so non-taps
+  don't pollute calibration. Log lines also carry `model`, `label`, `reasons`, `latency_ms`, `error`.
+- `mode: "badge"` is accepted but runs as shadow until phase 2 exists. `timeout_ms` and `base_url` are configurable.
+- `tiny-harness -risk-report` summarises the log (label x decision, denied-but-green, allowed-but-red).
+- API shape checked against the live api.typesafe.ai/openapi.json (Oct 25 2026); score levels start at 0.
+  NOT verified: a real call with the owner's key.
 
 ### API (from docs.typesafe.ai, Oct 2026)
 - `POST https://api.typesafe.ai/v1/systemone`, headers `Authorization: Bearer $TYPESAFE_API_KEY`,

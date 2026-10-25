@@ -24,6 +24,7 @@ type Server struct {
 	wsNames []string
 	hc      *http.Client
 	mcpN    int
+	risk    *riskChecker // nil = off
 
 	mu        sync.Mutex
 	sessions  map[string]*Session

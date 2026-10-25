@@ -1,4 +1,4 @@
-# tiny-harness v0.2.1
+# tiny-harness v0.3.0
 
 A small coding agent you can drive from your phone. One Go binary (~7 MB), no runtime, no dependencies.
 Measured on Linux: ~9 MB resident at idle, of which ~1.5 MB is private memory (the rest is the binary itself),
@@ -106,6 +106,28 @@ Open the `https://<pc-name>.<tailnet>.ts.net` URL on the phone and "Add to Home 
   but prompt injection is a real risk: that's what the approval step is for.
 - MCP `auto_approve` lists tools that run without asking; only list read-only tools you trust.
 - Images and chat history are stored unencrypted in `~/.tiny-harness/sessions/`.
+
+## Optional: Jev risk check (shadow mode)
+
+[TypeSafe Jev](https://docs.typesafe.ai) can score each action that shows an approval card: destructive?
+sends data off the machine? installs software? outside the workspace? touches secrets? off-task? plus a
+0-3 severity score. Off unless configured **and** `TYPESAFE_API_KEY` is set:
+
+```json
+"risk_check": { "model": "jev-1.14.0", "mode": "shadow" },
+"risk_check_skip_workspaces": ["plc"]
+```
+
+- **Shadow mode changes nothing you see.** The check runs beside the approval card and each verdict is
+  appended to `~/.tiny-harness/risk-shadow.jsonl` with your actual tap (`allowed`, `denied`, or `no_answer`
+  if you stopped the turn or it timed out). Errors and timeouts (`timeout_ms`, default 3000) are logged
+  and otherwise ignored.
+- After a week or so, run `tiny-harness -risk-report`: counts per label and decision, the actions you denied
+  that Jev called green, and the ones you allowed that it called red.
+- Jev never approves anything. The text it judges is written by the model and can be shaped by prompt injection.
+- **Privacy:** every checked command, file path and your latest message are sent to TypeSafe. List
+  workspaces that must not leave the machine in `risk_check_skip_workspaces` (workspace names, `default` included).
+- Cost: $0.042 per million input tokens; a check is ~500-900 tokens.
 
 ## Build from source
 
