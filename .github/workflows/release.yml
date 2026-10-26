@@ -1,11 +1,15 @@
-# Publishes a GitHub Release with prebuilt binaries when a version tag is pushed:
-#   git tag v0.3.1 && git push origin v0.3.1
+# Publishes a GitHub Release with prebuilt binaries. Two ways to start it:
+#   - push a version tag: git tag v0.3.1 && git push origin v0.3.1
+#   - Actions tab -> release -> "Run workflow" on main (works in the GitHub mobile app):
+#     releases main as v<const version>, creating the tag.
+# A release made first with GitHub's "Draft a new release" button also works: the assets are added to it.
 # The install link in README.md points at the latest release's assets.
 name: release
 
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -20,13 +24,32 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Tag must match const version
+      - name: Pick the version
         run: |
           v=$(sed -n 's/^const version = "\(.*\)"$/\1/p' main.go)
-          if [ "v$v" != "$GITHUB_REF_NAME" ]; then
-            echo "::error::tag $GITHUB_REF_NAME does not match const version $v in main.go"
-            exit 1
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            if [ "$GITHUB_REF" != refs/heads/main ]; then
+              echo "::error::run the release workflow on main (got $GITHUB_REF)"
+              exit 1
+            fi
+            tag="v$v"
+            # an existing tag must point at this commit, so a tag never ends up with another commit's binaries
+            git fetch --quiet origin "refs/tags/$tag:refs/tags/$tag" 2>/dev/null || true
+            if have=$(git rev-parse -q --verify "refs/tags/$tag^{commit}"); then
+              if [ "$have" != "$GITHUB_SHA" ]; then
+                echo "::error::$tag already exists at $have; bump const version in main.go to release this commit"
+                exit 1
+              fi
+            fi
+          else
+            tag="$GITHUB_REF_NAME"
+            if [ "$tag" != "v$v" ]; then
+              echo "::error::tag $tag does not match const version $v in main.go"
+              exit 1
+            fi
           fi
+          echo "TAG=$tag" >> "$GITHUB_ENV"
+          echo "releasing $tag"
 
       - name: Test
         run: go vet ./... && go test -race ./...
@@ -45,4 +68,9 @@ jobs:
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" release/* --title "tiny-harness $GITHUB_REF_NAME" --generate-notes
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" release/* --clobber
+          else
+            gh release create "$TAG" release/* --target "$GITHUB_SHA" --title "tiny-harness $TAG" --generate-notes
+          fi
