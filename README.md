@@ -186,10 +186,11 @@ Open the `https://<pc-name>.<tailnet>.ts.net` URL on the phone and "Add to Home 
 
 ## Build from source
 
-Releases are built by `.github/workflows/release.yml`: bump `const version` in main.go, merge, then push a
-matching tag (`git tag v0.3.1 && git push origin v0.3.1`). The workflow runs the tests, cross-compiles
-Windows/Linux/macOS binaries, and publishes them with `SHA256SUMS`, which is where the install links point.
-To build it yourself:
+Releases are built by `.github/workflows/release.yml`: bump `const version` in main.go, merge, then either push a
+matching tag (`git tag v0.3.1 && git push origin v0.3.1`) or, with no PC at hand, open the repo on github.com in
+a browser (on a phone too) → **Actions** → **release** → **Run workflow** on `main`, which creates the tag for you.
+The workflow runs the tests, cross-compiles Windows/Linux/macOS binaries, and publishes them with `SHA256SUMS`,
+which is where the install links point. To build it yourself:
 
 ```
 go build -trimpath -ldflags="-s -w" -o tiny-harness .      # Go 1.22+

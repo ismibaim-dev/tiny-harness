@@ -61,9 +61,11 @@ Current version: **0.3.1** (`const version` in main.go).
 go vet ./... && go test -race ./...
 CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o dist/tiny-harness.exe .
 ```
-Release: bump `const version`, merge to main, push tag `v<version>`. `.github/workflows/release.yml` checks the
-tag matches `const version`, runs vet + race tests, builds windows/linux/darwin × amd64/arm64 with the command
-above, and publishes them with `SHA256SUMS`. `install.ps1` (README's `irm … | iex` link) installs the latest
+Release: bump `const version`, merge to main, then push tag `v<version>` or press "Run workflow" (workflow_dispatch
+on main; creates the tag, refuses if it already exists at another commit). Cloud sessions get HTTP 403 pushing tags,
+so from a session the owner presses the button. `.github/workflows/release.yml` checks the tag matches
+`const version`, runs vet + race tests, builds windows/linux/darwin × amd64/arm64 with the command
+above, and publishes them with `SHA256SUMS` (uploads to the release if one was made by hand first). `install.ps1` (README's `irm … | iex` link) installs the latest
 release to `%LOCALAPPDATA%\Programs\tiny-harness`, verifies the checksum and adds it to the user PATH via the
 registry (keeps `%VARS%` unexpanded). Tested with pwsh 7 on Linux against a local fake release, not on real Windows.
 Manual/E2E: run with a mock config, e.g.
