@@ -26,6 +26,8 @@ Current version: **0.3.1** (`const version` in main.go).
 | fetch.go | web_fetch tool (crude HTML→text) |
 | mcp.go | minimal stdio MCP client (initialize, tools/list paginated, tools/call) |
 | proc_unix.go / proc_windows.go | kill whole process tree on timeout/stop |
+| install.ps1 | Windows installer behind the README's one-line install link |
+| .github/workflows/release.yml | builds and publishes release binaries on a `v*` tag |
 | web/index.html | the phone UI (embedded with go:embed), vanilla JS, light/dark tokens |
 | *_test.go | unit tests incl. fake SSE servers per provider and a fake MCP server (TestMain helper process) |
 
@@ -59,6 +61,11 @@ Current version: **0.3.1** (`const version` in main.go).
 go vet ./... && go test -race ./...
 CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o dist/tiny-harness.exe .
 ```
+Release: bump `const version`, merge to main, push tag `v<version>`. `.github/workflows/release.yml` checks the
+tag matches `const version`, runs vet + race tests, builds windows/linux/darwin × amd64/arm64 with the command
+above, and publishes them with `SHA256SUMS`. `install.ps1` (README's `irm … | iex` link) installs the latest
+release to `%LOCALAPPDATA%\Programs\tiny-harness`, verifies the checksum and adds it to the user PATH via the
+registry (keeps `%VARS%` unexpanded). Tested with pwsh 7 on Linux against a local fake release, not on real Windows.
 Manual/E2E: run with a mock config, e.g.
 ```json
 {"listen":"127.0.0.1:8798","workdir":"./ws","default_profile":"mock","token":"testtoken-0123456789abcdef",

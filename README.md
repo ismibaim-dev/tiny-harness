@@ -4,6 +4,15 @@ A small coding agent you can drive from your phone. One Go binary (~7 MB), no ru
 Measured on Linux: ~9 MB resident at idle, of which ~1.5 MB is private memory (the rest is the binary itself),
 ~10 MB after a working session. MCP servers you add run as separate processes and cost whatever they cost.
 
+**Install on Windows** (PowerShell, no admin needed):
+
+```powershell
+irm https://raw.githubusercontent.com/ismibaim-dev/tiny-harness/main/install.ps1 | iex
+```
+
+Or download [tiny-harness-windows-amd64.exe](https://github.com/ismibaim-dev/tiny-harness/releases/latest/download/tiny-harness-windows-amd64.exe) yourself.
+Full setup, including phone access: [Install (Windows, step by step)](#install-windows-step-by-step).
+
 ## What's in it
 
 - **Models:** Anthropic (with prompt caching), **Gemini (native API)**, and anything OpenAI-compatible:
@@ -23,19 +32,78 @@ Measured on Linux: ~9 MB resident at idle, of which ~1.5 MB is private memory (t
 
 Not included (on purpose, to stay small): sub-agents, plan mode, checkpoints/undo (use git), hooks, a TUI.
 
-## Quick start (Windows, PowerShell)
+## Install (Windows, step by step)
+
+You need a Windows PC, an API key for at least one model provider ([see the table](#built-in-profiles)),
+and, for phone access, Tailscale on the PC and the phone.
+
+**1. Install tiny-harness.** Open PowerShell (Start menu, type "PowerShell"; no admin needed) and paste:
 
 ```powershell
-# set whichever keys you have (setx makes them permanent for new terminals)
-$env:GEMINI_API_KEY    = "..."
-$env:ANTHROPIC_API_KEY = "..."
-$env:DEEPSEEK_API_KEY  = "..."
+irm https://raw.githubusercontent.com/ismibaim-dev/tiny-harness/main/install.ps1 | iex
+```
 
-.\tiny-harness.exe -workdir C:\Users\you\some-project
+It downloads the latest release to `%LOCALAPPDATA%\Programs\tiny-harness`, checks its SHA-256 checksum,
+and adds that folder to your user PATH. To do it by hand instead, download
+[tiny-harness-windows-amd64.exe](https://github.com/ismibaim-dev/tiny-harness/releases/latest/download/tiny-harness-windows-amd64.exe)
+([arm64](https://github.com/ismibaim-dev/tiny-harness/releases/latest/download/tiny-harness-windows-arm64.exe) for ARM laptops) from the
+[latest release](https://github.com/ismibaim-dev/tiny-harness/releases/latest), rename it to `tiny-harness.exe`, and put it in any folder.
+
+**2. Save an API key.** Pick at least one provider from the table below. `setx` keeps the key for new windows:
+
+```powershell
+setx GEMINI_API_KEY "paste-your-key-here"
+```
+
+**3. Open a new PowerShell window** so it picks up the PATH and the key, and check the install:
+
+```powershell
+tiny-harness -version
+```
+
+**4. Start it in a project folder:**
+
+```powershell
+tiny-harness -workdir C:\Users\you\some-project
 ```
 
 The first run prints an access token (also saved in `%USERPROFILE%\.tiny-harness\token`).
-Open `http://127.0.0.1:8787/` on the PC, paste the token, chat. Only profiles whose key is set show up.
+Keep this window open while you use it.
+
+**5. Try it on the PC.** Open <http://127.0.0.1:8787/>, paste the token, and send a message.
+Only profiles whose key is set appear in the model picker.
+
+**6. Reach it from your phone.** Install [Tailscale](https://tailscale.com/download) on the PC and the phone
+and sign in to the same account on both. Then, in a second PowerShell window on the PC:
+
+```powershell
+tailscale serve --bg 8787
+```
+
+It prints an `https://<pc-name>.<tailnet>.ts.net` address. Open it on the phone, paste the token, and use
+"Add to Home Screen". Never expose the port to the internet: it is a remote shell on your PC
+(see [Reaching it from your phone](#reaching-it-from-your-phone) and [Safety model](#safety-model)).
+
+**Update:** run the step 1 command again. It works while tiny-harness is running; restart it to use the new
+version. To install a specific version, run `$env:TINY_HARNESS_VERSION = "v0.3.1"` first.
+
+**Uninstall:** delete `%LOCALAPPDATA%\Programs\tiny-harness` and remove it from your user PATH (Start menu,
+"Edit environment variables for your account"). Chats, config and the token are in `%USERPROFILE%\.tiny-harness`;
+delete that folder too if you want them gone.
+
+**If Windows warns about the exe:** it is not code-signed, so SmartScreen or Defender may warn about a
+manual download. Each release has a `SHA256SUMS` file to check it against; the installer does that for you.
+
+### Linux and macOS
+
+Download the binary for your system (`linux-amd64`, `linux-arm64`, `darwin-arm64` for Apple silicon,
+`darwin-amd64`) from the [latest release](https://github.com/ismibaim-dev/tiny-harness/releases/latest):
+
+```sh
+curl -fsSL -o tiny-harness https://github.com/ismibaim-dev/tiny-harness/releases/latest/download/tiny-harness-linux-amd64
+chmod +x tiny-harness
+./tiny-harness -workdir ~/some-project
+```
 
 ### Built-in profiles
 
@@ -117,6 +185,11 @@ Open the `https://<pc-name>.<tailnet>.ts.net` URL on the phone and "Add to Home 
 - Images and chat history are stored unencrypted in `~/.tiny-harness/sessions/`.
 
 ## Build from source
+
+Releases are built by `.github/workflows/release.yml`: bump `const version` in main.go, merge, then push a
+matching tag (`git tag v0.3.1 && git push origin v0.3.1`). The workflow runs the tests, cross-compiles
+Windows/Linux/macOS binaries, and publishes them with `SHA256SUMS`, which is where the install links point.
+To build it yourself:
 
 ```
 go build -trimpath -ldflags="-s -w" -o tiny-harness .      # Go 1.22+

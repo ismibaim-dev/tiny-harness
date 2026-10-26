@@ -1,0 +1,48 @@
+# Publishes a GitHub Release with prebuilt binaries when a version tag is pushed:
+#   git tag v0.3.1 && git push origin v0.3.1
+# The install link in README.md points at the latest release's assets.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Tag must match const version
+        run: |
+          v=$(sed -n 's/^const version = "\(.*\)"$/\1/p' main.go)
+          if [ "v$v" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match const version $v in main.go"
+            exit 1
+          fi
+
+      - name: Test
+        run: go vet ./... && go test -race ./...
+
+      - name: Build
+        run: |
+          mkdir -p release
+          for target in windows/amd64 windows/arm64 linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
+            os=${target%/*} arch=${target#*/} ext=""
+            [ "$os" = windows ] && ext=.exe
+            CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -trimpath -ldflags="-s -w" \
+              -o "release/tiny-harness-$os-$arch$ext" .
+          done
+          cd release && sha256sum tiny-harness-* > SHA256SUMS && cat SHA256SUMS
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" release/* --title "tiny-harness $GITHUB_REF_NAME" --generate-notes
