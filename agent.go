@@ -369,7 +369,7 @@ func (s *Session) execTool(ctx context.Context, env *Env, u Block) Block {
 	if ctx.Err() != nil {
 		return finish("cancelled by user", true)
 	}
-	if s.needsApproval(t, u.Input) && !s.askApproval(ctx, env, u, summary) {
+	if s.needsApproval(t, u.Input) && !s.askApproval(ctx, u, summary) {
 		return finish("the user denied this action", true)
 	}
 	out, err := t.Run(ctx, env, u.Input)
@@ -398,20 +398,16 @@ func (s *Session) needsApproval(t *Tool, in json.RawMessage) bool {
 	return true
 }
 
-func (s *Session) askApproval(ctx context.Context, env *Env, u Block, detail string) bool {
+func (s *Session) askApproval(ctx context.Context, u Block, detail string) bool {
 	ch := make(chan bool, 1)
 	s.mu.Lock()
 	s.pending[u.ID] = ch
-	ws, request := s.Workspace, s.lastUserText()
 	s.mu.Unlock()
-	// Shadow risk check runs beside the card; it only logs, never decides.
-	record := s.srv.risk.check(s.ID, ws, env.Workdir, u.Name, detail, request)
 	s.emit(Event{Type: "approval", ID: u.ID, Name: u.Name, Text: detail})
 	s.srv.ping("Approval needed: "+u.Name, firstLine(detail))
-	allowed, answered := false, false
+	allowed := false
 	select {
 	case allowed = <-ch:
-		answered = true
 	case <-ctx.Done():
 	case <-time.After(30 * time.Minute):
 	}
@@ -422,34 +418,8 @@ func (s *Session) askApproval(ctx context.Context, env *Env, u Block, detail str
 	if allowed {
 		verdict = "allowed"
 	}
-	if record != nil {
-		if answered {
-			record(verdict)
-		} else {
-			record("no_answer")
-		}
-	}
 	s.emit(Event{Type: "approval_done", ID: u.ID, Text: verdict})
 	return allowed
-}
-
-// lastUserText is the owner's latest typed message. Must be called with s.mu held.
-func (s *Session) lastUserText() string {
-	for i := len(s.msgs) - 1; i >= 0; i-- {
-		if s.msgs[i].Role != "user" {
-			continue
-		}
-		var parts []string
-		for _, b := range s.msgs[i].Content {
-			if b.Type == "text" && !strings.HasPrefix(b.Text, summaryHeader) {
-				parts = append(parts, b.Text)
-			}
-		}
-		if len(parts) > 0 {
-			return strings.Join(parts, "\n")
-		}
-	}
-	return ""
 }
 
 // ------------------------------------------------------------ context mgmt

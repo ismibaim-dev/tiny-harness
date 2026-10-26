@@ -36,24 +36,22 @@ type Profile struct {
 }
 
 type Config struct {
-	Listen             string               `json:"listen"`
-	Token              string               `json:"token,omitempty"`
-	Workdir            string               `json:"workdir"`
-	Workspaces         map[string]string    `json:"workspaces,omitempty"` // name -> directory
-	DefaultProfile     string               `json:"default_profile"`
-	Profiles           map[string]Profile   `json:"profiles"`
-	MCPServers         map[string]MCPConfig `json:"mcp_servers,omitempty"`
-	Approval           string               `json:"approval"` // ask | auto-edit | yolo
-	SafeCommands       []string             `json:"safe_commands"`
-	BashTimeoutSec     int                  `json:"bash_timeout_sec"`
-	MaxSteps           int                  `json:"max_steps"`
-	MaxContextChars    int                  `json:"max_context_chars"`
-	Shell              []string             `json:"shell,omitempty"`
-	NtfyURL            string               `json:"ntfy_url,omitempty"`
-	AllowOutside       bool                 `json:"allow_outside_workspace,omitempty"`
-	SystemExtra        string               `json:"system_extra,omitempty"`
-	RiskCheck          *RiskConfig          `json:"risk_check,omitempty"`
-	RiskSkipWorkspaces []string             `json:"risk_check_skip_workspaces,omitempty"`
+	Listen          string               `json:"listen"`
+	Token           string               `json:"token,omitempty"`
+	Workdir         string               `json:"workdir"`
+	Workspaces      map[string]string    `json:"workspaces,omitempty"` // name -> directory
+	DefaultProfile  string               `json:"default_profile"`
+	Profiles        map[string]Profile   `json:"profiles"`
+	MCPServers      map[string]MCPConfig `json:"mcp_servers,omitempty"`
+	Approval        string               `json:"approval"` // ask | auto-edit | yolo
+	SafeCommands    []string             `json:"safe_commands"`
+	BashTimeoutSec  int                  `json:"bash_timeout_sec"`
+	MaxSteps        int                  `json:"max_steps"`
+	MaxContextChars int                  `json:"max_context_chars"`
+	Shell           []string             `json:"shell,omitempty"`
+	NtfyURL         string               `json:"ntfy_url,omitempty"`
+	AllowOutside    bool                 `json:"allow_outside_workspace,omitempty"`
+	SystemExtra     string               `json:"system_extra,omitempty"`
 }
 
 func defaultConfig() Config {
@@ -160,7 +158,6 @@ func main() {
 	approval := flag.String("approval", "", "ask | auto-edit | yolo")
 	initCfg := flag.Bool("init", false, "write an example config to the data dir and exit")
 	showVer := flag.Bool("version", false, "print version")
-	report := flag.Bool("risk-report", false, "summarise the Jev shadow log and exit")
 	flag.Parse()
 	if *showVer {
 		fmt.Println("tiny-harness", version)
@@ -168,12 +165,6 @@ func main() {
 	}
 
 	dir := dataDir()
-	if *report {
-		if err := riskReport(os.Stdout, filepath.Join(dir, "risk-shadow.jsonl")); err != nil {
-			log.Fatal(err)
-		}
-		return
-	}
 	if *initCfg {
 		p := filepath.Join(dir, "config.json")
 		if _, err := os.Stat(p); err == nil {
@@ -258,8 +249,6 @@ func main() {
 		provs:     map[string]Provider{},
 		modelList: map[string]modelCache{},
 	}
-	riskNote := ""
-	sv.risk, riskNote = newRiskChecker(&cfg, sv.hc, dir)
 	if len(cfg.MCPServers) > 0 {
 		sv.mcpN = startAllMCP(ctx, cfg.MCPServers)
 	}
@@ -271,9 +260,6 @@ func main() {
 	}
 	fmt.Printf("  shell     : %s\n  approval  : %s\n  models    : %s\n  tools     : %d (%d from MCP)\n  config    : %s\n  %s\n",
 		shellName(shell), cfg.Approval, orNone(sv.usableProfiles()), len(tools), sv.mcpN, path, note)
-	if riskNote != "" {
-		fmt.Printf("  risk check: %s\n", riskNote)
-	}
 	if len(sv.usableProfiles()) == 0 {
 		fmt.Println("  ! no usable model: set an API key env var (ANTHROPIC_API_KEY, GEMINI_API_KEY, DEEPSEEK_API_KEY, ...) or edit the config")
 	}
