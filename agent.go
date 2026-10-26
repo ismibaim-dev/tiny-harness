@@ -229,6 +229,7 @@ func (s *Session) begin() (context.Context, bool) {
 }
 
 func (s *Session) end() {
+	s.save() // before going idle, so anything that sees "idle" also sees the turn on disk
 	s.mu.Lock()
 	if s.cancel != nil {
 		s.cancel()
@@ -237,7 +238,6 @@ func (s *Session) end() {
 	s.lastUsed = time.Now()
 	s.mu.Unlock()
 	s.emit(Event{Type: "status", Text: "idle"})
-	s.save()
 }
 
 // ------------------------------------------------------------------ the loop

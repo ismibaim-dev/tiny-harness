@@ -132,7 +132,6 @@ func TestSystemPromptStable(t *testing.T) {
 	if started == "" {
 		t.Fatal("started not set")
 	}
-	s.save() // end() saves after clearing busy; don't race it
 	delete(sv.sessions, s.ID)
 	if again := sv.getSession(s.ID); again == nil || again.started != started {
 		t.Errorf("started after reload: %+v", again)

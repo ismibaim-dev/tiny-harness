@@ -2,3 +2,4 @@ dist/
 /tiny-harness
 ws/
 harness.json
+release/
