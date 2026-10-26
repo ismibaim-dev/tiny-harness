@@ -2,7 +2,7 @@
 
 Lightweight AI coding-agent harness, controlled from a phone. Single Go binary, stdlib only,
 serves its own mobile web UI. Owner runs it on his Windows laptop and reaches it via Tailscale.
-Current version: **0.3.0** (`const version` in main.go).
+Current version: **0.3.1** (`const version` in main.go).
 
 ## Goals and hard constraints
 - Stay lightweight: no third-party Go deps, ~7 MB binary, ~9 MB RSS idle (~1.5 MB private; rest is the mapped binary).
@@ -40,9 +40,16 @@ Current version: **0.3.0** (`const version` in main.go).
 - Tool approval by `Tool.Kind`: read (never asks) / edit / net / exec. ask mode asks for all non-read;
   auto-edit asks only for exec (bash, MCP). `safe_commands` = exact prefix match with no shell metacharacters.
   "Allow all this turn" sets `turnAllow` until the turn ends.
-- Context: `prepare()` elides old tool output/images/reasoning past `max_context_chars`, then auto-compacts
-  (model-written summary replaces history before the current turn). Manual compact via `/api/compact`.
+- Context: `prepare()` elides old tool output/images/reasoning past `max_context_chars` (default 200000), then
+  auto-compacts (model-written summary replaces history before the current turn). Manual compact via
+  `/api/compact`. Both use `compact_profile` when set and usable (`Server.compactWith`), else the chat's model.
   `repairHistory()` adds results for dangling tool_use blocks.
+- Tool output: every result passes `clipOutput()` in `execTool` (`max_tool_output_chars`, default 16000):
+  head + tail, `[... N lines / N bytes omitted ...]`. bash streams into `capWriter` (same marker, bounded RAM);
+  read_file, grep and web_fetch page to the same cap with a "continue with offset" note.
+- Stable prompt prefix (prompt caching): `systemPrompt()` takes the chat's `started` date (set on its first turn,
+  persisted) instead of the clock; MCP servers and their tools register in sorted order. Don't add per-turn
+  content to the system prompt or tool list.
 - Phone sync: `/api/poll` long-poll with `since`, `epoch`, `lv` (live-text version). Streaming text lives in
   `Session.live`; `finishLive()` swaps it for final events atomically.
 - Windows shell defaults to PowerShell with `-EncodedCommand` (UTF-16LE base64) to avoid quoting bugs.

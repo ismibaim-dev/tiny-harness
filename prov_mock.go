@@ -28,7 +28,7 @@ func (mockProv) Complete(ctx context.Context, r Request) (Response, error) {
 		return res
 	}
 	if strings.Contains(r.System, "summariz") {
-		return say("SUMMARY of earlier work."), nil
+		return say("SUMMARY of earlier work (" + r.Model + ")."), nil
 	}
 	last := r.Msgs[len(r.Msgs)-1]
 	if last.Role == "user" && len(last.Content) > 0 && last.Content[0].Type == "tool_result" {

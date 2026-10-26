@@ -1,4 +1,4 @@
-# tiny-harness v0.3.0
+# tiny-harness v0.3.1
 
 A small coding agent you can drive from your phone. One Go binary (~7 MB), no runtime, no dependencies.
 Measured on Linux: ~9 MB resident at idle, of which ~1.5 MB is private memory (the rest is the binary itself),
@@ -12,8 +12,11 @@ Measured on Linux: ~9 MB resident at idle, of which ~1.5 MB is private memory (t
 - **Streaming** replies on the phone.
 - **Tools:** `bash`, `read_file`, `write_file`, `edit_file`, `list_dir`, `grep`, `web_fetch`, plus any **MCP** server tools.
 - **Images:** attach photos/screenshots from the phone (resized on the phone before upload).
-- **Context management:** old tool output is trimmed first, then the history is **auto-compacted** into a
-  summary when it passes the budget; there is also a manual "Compact context" button.
+- **Context management:** every tool result is capped (head + tail kept, middle marked as omitted); old tool
+  output is trimmed first, then the history is **auto-compacted** into a summary when it passes the budget,
+  optionally by a cheaper model (`compact_profile`); there is also a manual "Compact context" button.
+- **Prompt caching friendly:** the system prompt and tool list stay byte-identical for the whole chat, so
+  Anthropic prompt caching and DeepSeek/Gemini prefix caching keep hitting.
 - **Project instructions:** `AGENTS.md` (or `CLAUDE.md`) in the workspace root is added to the system prompt.
 - **Workspaces:** several project folders; pick one per chat.
 - **Token usage** per chat, approvals with "Allow all this turn", optional push notifications via ntfy.
@@ -71,13 +74,19 @@ provider** and pick a current one, or type any model id.
   "mcp_servers": {
     "fs-memory": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-memory"], "auto_approve": ["*"] }
   },
+  "compact_profile": "deepseek-fast",
   "ntfy_url": "https://ntfy.sh/your-secret-topic-name"
 }
 ```
 
 - `extra` is merged into every request body (provider-specific switches: thinking, reasoning effort...).
 - `max_tokens` per profile; Gemini defaults to 32768 because thinking shares that budget.
-- `max_context_chars` (default 400000 ≈ 100k tokens) sets when auto-compaction kicks in.
+- `max_context_chars` (default 200000 ≈ 50k tokens) sets when auto-compaction kicks in.
+- `max_tool_output_chars` (default 16000, min 2000) caps each tool result. Longer output keeps its head and tail
+  with `[... N lines / N bytes omitted ...]` in between; `read_file`, `grep` and `web_fetch` stop at the cap
+  and say how to read further (offset/limit, a narrower pattern).
+- `compact_profile`: profile used to write compaction summaries, e.g. a cheap fast model. If it is unset or
+  has no API key, each chat compacts with its own model.
 - `shell`: default is PowerShell on Windows. For Git Bash: `"shell": ["C:\\Program Files\\Git\\bin\\bash.exe", "-c"]`.
 - `system_extra`: text appended to the system prompt.
 

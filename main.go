@@ -19,7 +19,7 @@ import (
 	"time"
 )
 
-const version = "0.3.0"
+const version = "0.3.1"
 
 //go:embed web/index.html
 var indexHTML []byte
@@ -36,22 +36,24 @@ type Profile struct {
 }
 
 type Config struct {
-	Listen          string               `json:"listen"`
-	Token           string               `json:"token,omitempty"`
-	Workdir         string               `json:"workdir"`
-	Workspaces      map[string]string    `json:"workspaces,omitempty"` // name -> directory
-	DefaultProfile  string               `json:"default_profile"`
-	Profiles        map[string]Profile   `json:"profiles"`
-	MCPServers      map[string]MCPConfig `json:"mcp_servers,omitempty"`
-	Approval        string               `json:"approval"` // ask | auto-edit | yolo
-	SafeCommands    []string             `json:"safe_commands"`
-	BashTimeoutSec  int                  `json:"bash_timeout_sec"`
-	MaxSteps        int                  `json:"max_steps"`
-	MaxContextChars int                  `json:"max_context_chars"`
-	Shell           []string             `json:"shell,omitempty"`
-	NtfyURL         string               `json:"ntfy_url,omitempty"`
-	AllowOutside    bool                 `json:"allow_outside_workspace,omitempty"`
-	SystemExtra     string               `json:"system_extra,omitempty"`
+	Listen             string               `json:"listen"`
+	Token              string               `json:"token,omitempty"`
+	Workdir            string               `json:"workdir"`
+	Workspaces         map[string]string    `json:"workspaces,omitempty"` // name -> directory
+	DefaultProfile     string               `json:"default_profile"`
+	Profiles           map[string]Profile   `json:"profiles"`
+	MCPServers         map[string]MCPConfig `json:"mcp_servers,omitempty"`
+	Approval           string               `json:"approval"` // ask | auto-edit | yolo
+	SafeCommands       []string             `json:"safe_commands"`
+	BashTimeoutSec     int                  `json:"bash_timeout_sec"`
+	MaxSteps           int                  `json:"max_steps"`
+	MaxContextChars    int                  `json:"max_context_chars"`
+	MaxToolOutputChars int                  `json:"max_tool_output_chars"`
+	CompactProfile     string               `json:"compact_profile,omitempty"` // cheaper profile for summaries
+	Shell              []string             `json:"shell,omitempty"`
+	NtfyURL            string               `json:"ntfy_url,omitempty"`
+	AllowOutside       bool                 `json:"allow_outside_workspace,omitempty"`
+	SystemExtra        string               `json:"system_extra,omitempty"`
 }
 
 func defaultConfig() Config {
@@ -72,11 +74,12 @@ func defaultConfig() Config {
 			"groq":       oa("openai/gpt-oss-120b", "https://api.groq.com/openai/v1", "GROQ_API_KEY"),
 			"mistral":    oa("mistral-large-latest", "https://api.mistral.ai/v1", "MISTRAL_API_KEY"),
 		},
-		Approval:        "ask",
-		SafeCommands:    []string{"pwd", "whoami", "date", "git status", "git log", "git diff", "go version"},
-		BashTimeoutSec:  120,
-		MaxSteps:        60,
-		MaxContextChars: 400000,
+		Approval:           "ask",
+		SafeCommands:       []string{"pwd", "whoami", "date", "git status", "git log", "git diff", "go version"},
+		BashTimeoutSec:     120,
+		MaxSteps:           60,
+		MaxContextChars:    200000,
+		MaxToolOutputChars: 16000,
 	}
 }
 
@@ -218,7 +221,17 @@ func main() {
 		cfg.MaxSteps = 60
 	}
 	if cfg.MaxContextChars <= 0 {
-		cfg.MaxContextChars = 400000
+		cfg.MaxContextChars = 200000
+	}
+	if cfg.MaxToolOutputChars <= 0 {
+		cfg.MaxToolOutputChars = 16000
+	} else if cfg.MaxToolOutputChars < 2000 {
+		cfg.MaxToolOutputChars = 2000
+	}
+	if cp := cfg.CompactProfile; cp != "" {
+		if _, ok := cfg.Profiles[cp]; !ok {
+			log.Fatalf("compact_profile %q is not defined in profiles", cp)
+		}
 	}
 	token, note, err := loadToken(cfg, dir)
 	if err != nil {
@@ -260,6 +273,13 @@ func main() {
 	}
 	fmt.Printf("  shell     : %s\n  approval  : %s\n  models    : %s\n  tools     : %d (%d from MCP)\n  config    : %s\n  %s\n",
 		shellName(shell), cfg.Approval, orNone(sv.usableProfiles()), len(tools), sv.mcpN, path, note)
+	if cp := cfg.CompactProfile; cp != "" {
+		if _, err := sv.provider(cp); err != nil {
+			fmt.Printf("  ! compact_profile %s is not usable (%v); chats compact with their own model\n", cp, err)
+		} else {
+			fmt.Printf("  compact   : %s (%s)\n", cp, cfg.Profiles[cp].Model)
+		}
+	}
 	if len(sv.usableProfiles()) == 0 {
 		fmt.Println("  ! no usable model: set an API key env var (ANTHROPIC_API_KEY, GEMINI_API_KEY, DEEPSEEK_API_KEY, ...) or edit the config")
 	}

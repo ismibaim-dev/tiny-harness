@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 	"unicode/utf16"
+	"unicode/utf8"
 )
 
 // Env is what tools run against.
@@ -172,12 +173,54 @@ func within(root, p string) bool {
 	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
 }
 
-// capWriter keeps the head and tail of a stream and drops the middle.
+// outputCap is the per-result budget from max_tool_output_chars.
+func outputCap(c *Config) int {
+	if c == nil || c.MaxToolOutputChars <= 0 {
+		return 16000
+	}
+	return c.MaxToolOutputChars
+}
+
+func omittedNote(lines, n int) string {
+	return fmt.Sprintf("\n[... %d lines / %d bytes omitted ...]\n", lines, n)
+}
+
+// clipOutput keeps the head and tail of a tool result within max bytes and
+// marks what was dropped from the middle. Every tool result goes through it.
+func clipOutput(s string, max int) string {
+	if max <= 0 || len(s) <= max {
+		return s
+	}
+	half := (max - 64) / 2 // room for the marker
+	if half < 0 {
+		half = 0
+	}
+	h := half
+	for h > 0 && !utf8.RuneStart(s[h]) {
+		h--
+	}
+	if i := strings.LastIndexByte(s[:h], '\n'); i >= 0 && i >= h*3/4 {
+		h = i + 1 // cut on a line break when one is near
+	}
+	t := len(s) - half
+	for t < len(s) && !utf8.RuneStart(s[t]) {
+		t++
+	}
+	if i := strings.IndexByte(s[t:], '\n'); i >= 0 && i < half/4 {
+		t += i + 1
+	}
+	mid := s[h:t]
+	return s[:h] + omittedNote(strings.Count(mid, "\n"), len(mid)) + s[t:]
+}
+
+// capWriter keeps the head and tail of a stream and drops the middle, so a
+// huge command output never sits in memory.
 type capWriter struct {
 	mu               sync.Mutex
 	head, tail       []byte
 	headMax, tailMax int
 	total            int
+	droppedLines     int
 }
 
 func newCapWriter(headMax, tailMax int) *capWriter {
@@ -200,7 +243,9 @@ func (w *capWriter) Write(p []byte) (int, error) {
 	if len(p) > 0 {
 		w.tail = append(w.tail, p...)
 		if len(w.tail) > w.tailMax*2 {
-			w.tail = append([]byte(nil), w.tail[len(w.tail)-w.tailMax:]...)
+			cut := len(w.tail) - w.tailMax
+			w.droppedLines += bytes.Count(w.tail[:cut], []byte{'\n'})
+			w.tail = append([]byte(nil), w.tail[cut:]...)
 		}
 	}
 	return n, nil
@@ -209,13 +254,26 @@ func (w *capWriter) Write(p []byte) (int, error) {
 func (w *capWriter) String() string {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	tail := w.tail
+	head, tail, lines := w.head, w.tail, w.droppedLines
 	if len(tail) > w.tailMax {
+		lines += bytes.Count(tail[:len(tail)-w.tailMax], []byte{'\n'})
 		tail = tail[len(tail)-w.tailMax:]
 	}
-	s := string(w.head)
-	if dropped := w.total - len(w.head) - len(tail); dropped > 0 {
-		s += fmt.Sprintf("\n...[%d bytes omitted]...\n", dropped)
+	dropped := w.total - len(head) - len(tail)
+	if dropped > 0 {
+		// cut on line breaks when one is near, like clipOutput
+		if i := bytes.LastIndexByte(head, '\n'); i >= 0 && i >= len(head)*3/4 {
+			dropped += len(head) - i - 1
+			head = head[:i+1]
+		}
+		if i := bytes.IndexByte(tail, '\n'); i >= 0 && i < len(tail)/4 {
+			dropped, lines = dropped+i+1, lines+1
+			tail = tail[i+1:]
+		}
+	}
+	s := string(head)
+	if dropped > 0 {
+		s += omittedNote(lines, dropped)
 	}
 	s += string(tail)
 	return strings.ToValidUTF8(s, "?")
@@ -261,7 +319,8 @@ func runBash(ctx context.Context, e *Env, in json.RawMessage) (string, error) {
 	setupProc(cmd)
 	cmd.Cancel = func() error { return killTree(cmd) }
 	cmd.WaitDelay = 3 * time.Second
-	w := newCapWriter(12000, 12000)
+	half := (outputCap(e.Cfg) - 200) / 2 // leave room for the exit-code line
+	w := newCapWriter(half, half)
 	cmd.Stdout = w
 	cmd.Stderr = w
 
@@ -286,7 +345,8 @@ func runBash(ctx context.Context, e *Env, in json.RawMessage) (string, error) {
 func toolRead() *Tool {
 	return &Tool{
 		Name: "read_file", Kind: "read",
-		Desc: "Read a text file inside the workspace. Returns numbered lines. Use offset/limit for big files.",
+		Desc: "Read a text file inside the workspace. Returns numbered lines. Big files come back one chunk at a time: " +
+			"use offset/limit to read a range, or grep to find the lines you need first.",
 		Schema: schema(map[string]any{
 			"path":   sType("string", "File path, relative to the workspace or absolute inside it."),
 			"offset": sType("integer", "1-based line to start from (default 1)."),
@@ -349,16 +409,20 @@ func runRead(ctx context.Context, e *Env, in json.RawMessage) (string, error) {
 	if end > len(lines) {
 		end = len(lines)
 	}
+	budget := outputCap(e.Cfg) - 300 // leave room for the note
 	var b strings.Builder
+	last := end
 	for i := off - 1; i < end; i++ {
-		fmt.Fprintf(&b, "%6d\t%s\n", i+1, trunc(strings.TrimSuffix(lines[i], "\r"), 2000))
-		if b.Len() > 60000 {
-			fmt.Fprintf(&b, "[truncated; continue with offset=%d]\n", i+2)
-			return b.String(), nil
+		line := fmt.Sprintf("%6d\t%s\n", i+1, trunc(strings.TrimSuffix(lines[i], "\r"), 2000))
+		if b.Len() > 0 && b.Len()+len(line) > budget {
+			last = i
+			break
 		}
+		b.WriteString(line)
 	}
-	if end < len(lines) {
-		fmt.Fprintf(&b, "[%d more lines; continue with offset=%d]\n", len(lines)-end, end+1)
+	if last < len(lines) {
+		fmt.Fprintf(&b, "[showing lines %d-%d of %d (%d bytes); continue with offset=%d, or grep for what you need]\n",
+			off, last, len(lines), len(data), last+1)
 	}
 	return b.String(), nil
 }
@@ -551,8 +615,9 @@ func runGrep(ctx context.Context, e *Env, in json.RawMessage) (string, error) {
 		return "", err
 	}
 	const maxMatches = 200
+	budget := outputCap(e.Cfg) - 200
 	var b strings.Builder
-	count := 0
+	count, full := 0, false
 	walkErr := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil
@@ -589,7 +654,12 @@ func runGrep(ctx context.Context, e *Env, in json.RawMessage) (string, error) {
 		sc.Buffer(make([]byte, 64*1024), 1<<20)
 		for ln := 1; sc.Scan(); ln++ {
 			if re.MatchString(sc.Text()) {
-				fmt.Fprintf(&b, "%s:%d:%s\n", rel, ln, trunc(sc.Text(), 300))
+				line := fmt.Sprintf("%s:%d:%s\n", rel, ln, trunc(sc.Text(), 300))
+				if b.Len()+len(line) > budget {
+					full = true
+					return fs.SkipAll
+				}
+				b.WriteString(line)
 				count++
 				if count >= maxMatches {
 					return fs.SkipAll
@@ -604,7 +674,9 @@ func runGrep(ctx context.Context, e *Env, in json.RawMessage) (string, error) {
 	if count == 0 {
 		return "(no matches)", nil
 	}
-	if count >= maxMatches {
+	if full {
+		fmt.Fprintf(&b, "[output limit reached after %d matches; narrow the pattern, path or glob]\n", count)
+	} else if count >= maxMatches {
 		b.WriteString("[stopped at 200 matches; narrow the search]\n")
 	}
 	return b.String(), nil

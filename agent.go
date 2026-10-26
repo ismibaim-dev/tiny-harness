@@ -45,7 +45,8 @@ type Session struct {
 	live      string // text being streamed right now
 	liveVer   int
 	usage     Usage
-	lastIn    int // prompt size of the latest call (≈ context used)
+	lastIn    int    // prompt size of the latest call (≈ context used)
+	started   string // date in the system prompt, fixed per chat so prompt caches keep hitting
 }
 
 type stored struct {
@@ -58,6 +59,7 @@ type stored struct {
 	Updated   int64     `json:"updated"`
 	Usage     Usage     `json:"usage"`
 	LastIn    int       `json:"last_in,omitempty"`
+	Started   string    `json:"started,omitempty"`
 	Msgs      []Message `json:"msgs,omitempty"`
 }
 
@@ -260,6 +262,10 @@ func (s *Session) runTurn() {
 
 	s.mu.Lock()
 	profile, model, ws := s.Profile, s.modelLocked(), s.Workspace
+	if s.started == "" {
+		s.started = time.Now().Format("Monday 2 January 2006")
+	}
+	started := s.started
 	s.mu.Unlock()
 	prov, err := s.srv.provider(profile)
 	if err != nil {
@@ -267,8 +273,9 @@ func (s *Session) runTurn() {
 		return
 	}
 	env := s.srv.envFor(ws)
-	system := s.srv.systemPrompt(env)
+	system := s.srv.systemPrompt(env, started)
 	defs := toolDefs()
+	cprov, cmodel := s.srv.compactWith(prov, model)
 
 	for step := 0; step < s.srv.cfg.MaxSteps; step++ {
 		if ctx.Err() != nil {
@@ -276,7 +283,7 @@ func (s *Session) runTurn() {
 			return
 		}
 		if s.prepare() > s.srv.cfg.MaxContextChars {
-			if err := s.compact(ctx, prov, model, defs, false); err != nil && ctx.Err() == nil {
+			if err := s.compact(ctx, cprov, cmodel, defs, false); err != nil && ctx.Err() == nil {
 				s.emit(Event{Type: "error", Text: "auto-compaction skipped: " + err.Error(), Err: true})
 			}
 		}
@@ -355,6 +362,7 @@ func (s *Session) execTool(ctx context.Context, env *Env, u Block) Block {
 		if content == "" {
 			content = "(no output)"
 		}
+		content = clipOutput(content, outputCap(s.srv.cfg))
 		res.Content, res.IsError = content, isErr
 		s.emit(Event{Type: "tool_result", ID: u.ID, Text: trunc(content, 3000), Err: isErr})
 		return res
@@ -593,6 +601,7 @@ func (s *Session) CompactNow() error {
 		return err
 	}
 	s.emit(Event{Type: "status", Text: "busy"})
+	prov, model = s.srv.compactWith(prov, model)
 	go func() {
 		defer s.end()
 		s.prepare()
@@ -612,7 +621,7 @@ func (s *Session) save() {
 		return
 	}
 	data, err := json.Marshal(stored{ID: s.ID, Title: s.title, Profile: s.Profile, Model: s.Model, Mode: s.Mode,
-		Workspace: s.Workspace, Updated: time.Now().Unix(), Usage: s.usage, LastIn: s.lastIn, Msgs: s.msgs})
+		Workspace: s.Workspace, Updated: time.Now().Unix(), Usage: s.usage, LastIn: s.lastIn, Started: s.started, Msgs: s.msgs})
 	s.mu.Unlock()
 	if err != nil {
 		return

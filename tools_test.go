@@ -4,12 +4,16 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
 	"unicode/utf16"
+	"unicode/utf8"
 )
 
 func testEnv(t *testing.T) *Env {
@@ -146,5 +150,133 @@ func TestHTMLToText(t *testing.T) {
 	got := htmlToText(`<html><head><title>x</title></head><body><script>bad()</script><h1>Hi &amp; bye</h1><p>one</p><p>two</p></body></html>`)
 	if strings.Contains(got, "bad()") || !strings.Contains(got, "Hi & bye") || !strings.Contains(got, "two") {
 		t.Errorf("htmlToText: %q", got)
+	}
+}
+
+func TestClipOutput(t *testing.T) {
+	if got := clipOutput("short", 100); got != "short" {
+		t.Errorf("short input changed: %q", got)
+	}
+	var sb strings.Builder
+	for i := 1; i <= 5000; i++ {
+		fmt.Fprintf(&sb, "line %d héllo\n", i)
+	}
+	in := sb.String()
+	out := clipOutput(in, 4000)
+	if len(out) > 4000 || !utf8.ValidString(out) {
+		t.Fatalf("len=%d valid=%v", len(out), utf8.ValidString(out))
+	}
+	if !strings.HasPrefix(out, "line 1 héllo\n") || !strings.HasSuffix(out, "line 5000 héllo\n") {
+		t.Error("head or tail lost")
+	}
+	var lines, n int
+	if _, err := fmt.Sscanf(out[strings.Index(out, "[... "):], "[... %d lines / %d bytes omitted ...]", &lines, &n); err != nil {
+		t.Fatalf("marker: %v\n%s", err, out)
+	}
+	head, tail, _ := strings.Cut(out, omittedNote(lines, n))
+	if len(head)+n+len(tail) != len(in) || strings.Count(in[len(head):len(in)-len(tail)], "\n") != lines {
+		t.Errorf("counts: head=%d omitted=%d tail=%d lines=%d of %d", len(head), n, len(tail), lines, len(in))
+	}
+	if !strings.HasSuffix(head, "llo\n") || !strings.HasPrefix(tail, "line ") {
+		t.Error("should cut on line breaks")
+	}
+	one := strings.Repeat("é", 10000) // no newlines, multibyte
+	if got := clipOutput(one, 3000); len(got) > 3000 || !utf8.ValidString(got) || !strings.Contains(got, "[... 0 lines /") {
+		t.Errorf("single line: len=%d valid=%v", len(got), utf8.ValidString(got))
+	}
+}
+
+func TestCapWriterMarker(t *testing.T) {
+	w := newCapWriter(1000, 1000)
+	var all strings.Builder
+	for i := 0; i < 3000; i++ {
+		s := fmt.Sprintf("row %d\n", i)
+		all.WriteString(s)
+		w.Write([]byte(s))
+	}
+	out, in := w.String(), all.String()
+	var lines, n int
+	if _, err := fmt.Sscanf(out[strings.Index(out, "[... "):], "[... %d lines / %d bytes omitted ...]", &lines, &n); err != nil {
+		t.Fatalf("marker: %v", err)
+	}
+	head, tail, _ := strings.Cut(out, omittedNote(lines, n))
+	if len(head)+n+len(tail) != len(in) || strings.Count(in[len(head):len(in)-len(tail)], "\n") != lines {
+		t.Errorf("counts: head=%d omitted=%d tail=%d lines=%d", len(head), n, len(tail), lines)
+	}
+	if !strings.HasPrefix(in, head) || !strings.HasSuffix(in, tail) || !strings.HasSuffix(head, "\n") || !strings.HasPrefix(tail, "row ") {
+		t.Errorf("should keep whole lines: head ends %q, tail starts %q", head[len(head)-8:], tail[:8])
+	}
+}
+
+func TestBashOutputCapped(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses seq")
+	}
+	e := testEnv(t)
+	e.Cfg.MaxToolOutputChars = 4000
+	out, err := call(t, e, "bash", map[string]any{"command": "seq 1 100000"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) > 4000 || !strings.HasPrefix(out, "1\n2\n") || !strings.HasSuffix(strings.TrimSpace(out), "100000") || !strings.Contains(out, " lines / ") {
+		t.Errorf("len=%d head=%q tail=%q", len(out), out[:20], out[len(out)-20:])
+	}
+}
+
+func TestReadFileChunks(t *testing.T) {
+	e := testEnv(t)
+	e.Cfg.MaxToolOutputChars = 4000
+	var sb strings.Builder
+	for i := 1; i <= 5000; i++ {
+		fmt.Fprintf(&sb, "row %d\n", i)
+	}
+	if err := os.WriteFile(filepath.Join(e.Workdir, "big.txt"), []byte(sb.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, _ := call(t, e, "read_file", map[string]any{"path": "big.txt"})
+	var from, to, total, next int
+	note := out[strings.LastIndex(out, "[showing"):]
+	if _, err := fmt.Sscanf(note, "[showing lines %d-%d of %d", &from, &to, &total); err != nil || from != 1 || total != 5001 {
+		t.Fatalf("note %q: %v", note, err)
+	}
+	if len(out) > 4000 || !strings.Contains(note, fmt.Sprintf("offset=%d", to+1)) {
+		t.Errorf("len=%d note=%q", len(out), note)
+	}
+	_, _ = fmt.Sscanf(note[strings.Index(note, "offset="):], "offset=%d", &next)
+	out2, _ := call(t, e, "read_file", map[string]any{"path": "big.txt", "offset": next})
+	if !strings.HasPrefix(strings.TrimSpace(out2), fmt.Sprintf("%d\trow %d", next, next)) {
+		t.Errorf("continuation starts with %q", out2[:30])
+	}
+	out3, _ := call(t, e, "read_file", map[string]any{"path": "big.txt", "offset": 10, "limit": 5})
+	if strings.Count(out3, "\trow ") != 5 || !strings.Contains(out3, "[showing lines 10-14 of 5001") {
+		t.Errorf("range read: %q", out3)
+	}
+	_ = os.WriteFile(filepath.Join(e.Workdir, "small.txt"), []byte("a\nb\n"), 0o644)
+	if out4, _ := call(t, e, "read_file", map[string]any{"path": "small.txt"}); strings.Contains(out4, "[showing") {
+		t.Errorf("small file should have no note: %q", out4)
+	}
+}
+
+func TestGrepBudget(t *testing.T) {
+	e := testEnv(t)
+	e.Cfg.MaxToolOutputChars = 2000
+	_ = os.WriteFile(filepath.Join(e.Workdir, "m.txt"), []byte(strings.Repeat("needle here and some more text\n", 150)), 0o644)
+	out, err := call(t, e, "grep", map[string]any{"pattern": "needle"})
+	if err != nil || len(out) > 2000 || !strings.Contains(out, "[output limit reached after") {
+		t.Errorf("len=%d err=%v tail=%q", len(out), err, out[max(0, len(out)-80):])
+	}
+}
+
+func TestWebFetchPage(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.Write([]byte(strings.Repeat("0123456789", 5000)))
+	}))
+	defer srv.Close()
+	e := testEnv(t)
+	e.Cfg.MaxToolOutputChars = 4000
+	out, err := call(t, e, "web_fetch", map[string]any{"url": srv.URL})
+	if err != nil || len(out) > 4000 || !strings.Contains(out, "[truncated; continue with offset=3700]") {
+		t.Errorf("len=%d err=%v tail=%q", len(out), err, out[max(0, len(out)-60):])
 	}
 }
