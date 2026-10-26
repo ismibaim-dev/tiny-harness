@@ -19,7 +19,7 @@ import (
 	"time"
 )
 
-const version = "0.3.0"
+const version = "0.3.1"
 
 //go:embed web/index.html
 var indexHTML []byte
@@ -48,12 +48,12 @@ type Config struct {
 	BashTimeoutSec     int                  `json:"bash_timeout_sec"`
 	MaxSteps           int                  `json:"max_steps"`
 	MaxContextChars    int                  `json:"max_context_chars"`
+	MaxToolOutputChars int                  `json:"max_tool_output_chars"`
+	CompactProfile     string               `json:"compact_profile,omitempty"` // cheaper profile for summaries
 	Shell              []string             `json:"shell,omitempty"`
 	NtfyURL            string               `json:"ntfy_url,omitempty"`
 	AllowOutside       bool                 `json:"allow_outside_workspace,omitempty"`
 	SystemExtra        string               `json:"system_extra,omitempty"`
-	RiskCheck          *RiskConfig          `json:"risk_check,omitempty"`
-	RiskSkipWorkspaces []string             `json:"risk_check_skip_workspaces,omitempty"`
 }
 
 func defaultConfig() Config {
@@ -74,11 +74,12 @@ func defaultConfig() Config {
 			"groq":       oa("openai/gpt-oss-120b", "https://api.groq.com/openai/v1", "GROQ_API_KEY"),
 			"mistral":    oa("mistral-large-latest", "https://api.mistral.ai/v1", "MISTRAL_API_KEY"),
 		},
-		Approval:        "ask",
-		SafeCommands:    []string{"pwd", "whoami", "date", "git status", "git log", "git diff", "go version"},
-		BashTimeoutSec:  120,
-		MaxSteps:        60,
-		MaxContextChars: 400000,
+		Approval:           "ask",
+		SafeCommands:       []string{"pwd", "whoami", "date", "git status", "git log", "git diff", "go version"},
+		BashTimeoutSec:     120,
+		MaxSteps:           60,
+		MaxContextChars:    200000,
+		MaxToolOutputChars: 16000,
 	}
 }
 
@@ -160,7 +161,6 @@ func main() {
 	approval := flag.String("approval", "", "ask | auto-edit | yolo")
 	initCfg := flag.Bool("init", false, "write an example config to the data dir and exit")
 	showVer := flag.Bool("version", false, "print version")
-	report := flag.Bool("risk-report", false, "summarise the Jev shadow log and exit")
 	flag.Parse()
 	if *showVer {
 		fmt.Println("tiny-harness", version)
@@ -168,12 +168,6 @@ func main() {
 	}
 
 	dir := dataDir()
-	if *report {
-		if err := riskReport(os.Stdout, filepath.Join(dir, "risk-shadow.jsonl")); err != nil {
-			log.Fatal(err)
-		}
-		return
-	}
 	if *initCfg {
 		p := filepath.Join(dir, "config.json")
 		if _, err := os.Stat(p); err == nil {
@@ -227,7 +221,17 @@ func main() {
 		cfg.MaxSteps = 60
 	}
 	if cfg.MaxContextChars <= 0 {
-		cfg.MaxContextChars = 400000
+		cfg.MaxContextChars = 200000
+	}
+	if cfg.MaxToolOutputChars <= 0 {
+		cfg.MaxToolOutputChars = 16000
+	} else if cfg.MaxToolOutputChars < 2000 {
+		cfg.MaxToolOutputChars = 2000
+	}
+	if cp := cfg.CompactProfile; cp != "" {
+		if _, ok := cfg.Profiles[cp]; !ok {
+			log.Fatalf("compact_profile %q is not defined in profiles", cp)
+		}
 	}
 	token, note, err := loadToken(cfg, dir)
 	if err != nil {
@@ -258,8 +262,6 @@ func main() {
 		provs:     map[string]Provider{},
 		modelList: map[string]modelCache{},
 	}
-	riskNote := ""
-	sv.risk, riskNote = newRiskChecker(&cfg, sv.hc, dir)
 	if len(cfg.MCPServers) > 0 {
 		sv.mcpN = startAllMCP(ctx, cfg.MCPServers)
 	}
@@ -271,8 +273,12 @@ func main() {
 	}
 	fmt.Printf("  shell     : %s\n  approval  : %s\n  models    : %s\n  tools     : %d (%d from MCP)\n  config    : %s\n  %s\n",
 		shellName(shell), cfg.Approval, orNone(sv.usableProfiles()), len(tools), sv.mcpN, path, note)
-	if riskNote != "" {
-		fmt.Printf("  risk check: %s\n", riskNote)
+	if cp := cfg.CompactProfile; cp != "" {
+		if _, err := sv.provider(cp); err != nil {
+			fmt.Printf("  ! compact_profile %s is not usable (%v); chats compact with their own model\n", cp, err)
+		} else {
+			fmt.Printf("  compact   : %s (%s)\n", cp, cfg.Profiles[cp].Model)
+		}
 	}
 	if len(sv.usableProfiles()) == 0 {
 		fmt.Println("  ! no usable model: set an API key env var (ANTHROPIC_API_KEY, GEMINI_API_KEY, DEEPSEEK_API_KEY, ...) or edit the config")

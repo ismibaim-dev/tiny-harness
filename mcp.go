@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -287,7 +288,7 @@ func (c *mcpClient) toolFor(t mcpTool) *Tool {
 			if b.Len() == 0 && len(res.Structured) > 0 {
 				b.Write(res.Structured)
 			}
-			out := trunc(b.String(), 60000)
+			out := b.String() // execTool clips it like every tool result
 			if res.IsError {
 				return "", errors.New(out)
 			}
@@ -298,7 +299,15 @@ func (c *mcpClient) toolFor(t mcpTool) *Tool {
 
 // startAllMCP launches configured servers and registers their tools.
 func startAllMCP(ctx context.Context, servers map[string]MCPConfig) (count int) {
-	for name, cfg := range servers {
+	// Fixed order (not map order) so the tool list, part of the cached prompt
+	// prefix, is identical after every restart.
+	names := make([]string, 0, len(servers))
+	for name := range servers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		cfg := servers[name]
 		c, err := startMCP(ctx, name, cfg)
 		if err != nil {
 			log.Printf("mcp %s: start failed: %v", name, err)
@@ -310,6 +319,7 @@ func startAllMCP(ctx context.Context, servers map[string]MCPConfig) (count int) 
 			_ = c.cmd.Process.Kill()
 			continue
 		}
+		sort.Slice(ts, func(i, j int) bool { return ts[i].Name < ts[j].Name })
 		for _, t := range ts {
 			registerTool(c.toolFor(t))
 			count++

@@ -84,7 +84,7 @@ func toolFetch() *Tool {
 				}
 				body = body[a.Offset:]
 			}
-			const page = 40000
+			page := outputCap(e.Cfg) - 300
 			head := fmt.Sprintf("HTTP %d  %s\n\n", resp.StatusCode, ct)
 			if len(body) > page {
 				return head + strings.ToValidUTF8(body[:page], "") +

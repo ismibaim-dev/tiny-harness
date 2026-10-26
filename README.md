@@ -1,4 +1,4 @@
-# tiny-harness v0.3.0
+# tiny-harness v0.3.1
 
 A small coding agent you can drive from your phone. One Go binary (~7 MB), no runtime, no dependencies.
 Measured on Linux: ~9 MB resident at idle, of which ~1.5 MB is private memory (the rest is the binary itself),
@@ -12,8 +12,11 @@ Measured on Linux: ~9 MB resident at idle, of which ~1.5 MB is private memory (t
 - **Streaming** replies on the phone.
 - **Tools:** `bash`, `read_file`, `write_file`, `edit_file`, `list_dir`, `grep`, `web_fetch`, plus any **MCP** server tools.
 - **Images:** attach photos/screenshots from the phone (resized on the phone before upload).
-- **Context management:** old tool output is trimmed first, then the history is **auto-compacted** into a
-  summary when it passes the budget; there is also a manual "Compact context" button.
+- **Context management:** every tool result is capped (head + tail kept, middle marked as omitted); old tool
+  output is trimmed first, then the history is **auto-compacted** into a summary when it passes the budget,
+  optionally by a cheaper model (`compact_profile`); there is also a manual "Compact context" button.
+- **Prompt caching friendly:** the system prompt and tool list stay byte-identical for the whole chat, so
+  Anthropic prompt caching and DeepSeek/Gemini prefix caching keep hitting.
 - **Project instructions:** `AGENTS.md` (or `CLAUDE.md`) in the workspace root is added to the system prompt.
 - **Workspaces:** several project folders; pick one per chat.
 - **Token usage** per chat, approvals with "Allow all this turn", optional push notifications via ntfy.
@@ -71,13 +74,19 @@ provider** and pick a current one, or type any model id.
   "mcp_servers": {
     "fs-memory": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-memory"], "auto_approve": ["*"] }
   },
+  "compact_profile": "deepseek-fast",
   "ntfy_url": "https://ntfy.sh/your-secret-topic-name"
 }
 ```
 
 - `extra` is merged into every request body (provider-specific switches: thinking, reasoning effort...).
 - `max_tokens` per profile; Gemini defaults to 32768 because thinking shares that budget.
-- `max_context_chars` (default 400000 ≈ 100k tokens) sets when auto-compaction kicks in.
+- `max_context_chars` (default 200000 ≈ 50k tokens) sets when auto-compaction kicks in.
+- `max_tool_output_chars` (default 16000, min 2000) caps each tool result. Longer output keeps its head and tail
+  with `[... N lines / N bytes omitted ...]` in between; `read_file`, `grep` and `web_fetch` stop at the cap
+  and say how to read further (offset/limit, a narrower pattern).
+- `compact_profile`: profile used to write compaction summaries, e.g. a cheap fast model. If it is unset or
+  has no API key, each chat compacts with its own model.
 - `shell`: default is PowerShell on Windows. For Git Bash: `"shell": ["C:\\Program Files\\Git\\bin\\bash.exe", "-c"]`.
 - `system_extra`: text appended to the system prompt.
 
@@ -106,28 +115,6 @@ Open the `https://<pc-name>.<tailnet>.ts.net` URL on the phone and "Add to Home 
   but prompt injection is a real risk: that's what the approval step is for.
 - MCP `auto_approve` lists tools that run without asking; only list read-only tools you trust.
 - Images and chat history are stored unencrypted in `~/.tiny-harness/sessions/`.
-
-## Optional: Jev risk check (shadow mode)
-
-[TypeSafe Jev](https://docs.typesafe.ai) can score each action that shows an approval card: destructive?
-sends data off the machine? installs software? outside the workspace? touches secrets? off-task? plus a
-0-3 severity score. Off unless configured **and** `TYPESAFE_API_KEY` is set:
-
-```json
-"risk_check": { "model": "jev-1.14.0", "mode": "shadow" },
-"risk_check_skip_workspaces": ["plc"]
-```
-
-- **Shadow mode changes nothing you see.** The check runs beside the approval card and each verdict is
-  appended to `~/.tiny-harness/risk-shadow.jsonl` with your actual tap (`allowed`, `denied`, or `no_answer`
-  if you stopped the turn or it timed out). Errors and timeouts (`timeout_ms`, default 3000) are logged
-  and otherwise ignored.
-- After a week or so, run `tiny-harness -risk-report`: counts per label and decision, the actions you denied
-  that Jev called green, and the ones you allowed that it called red.
-- Jev never approves anything. The text it judges is written by the model and can be shaped by prompt injection.
-- **Privacy:** every checked command, file path and your latest message are sent to TypeSafe. List
-  workspaces that must not leave the machine in `risk_check_skip_workspaces` (workspace names, `default` included).
-- Cost: $0.042 per million input tokens; a check is ~500-900 tokens.
 
 ## Build from source
 
